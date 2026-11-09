@@ -1,0 +1,43 @@
+# Fork-only check for the fp8 float64 fix. Not part of the upstream PR.
+name: fork-fp8-check
+on:
+  push:
+    branches: [ci-macos-check]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ ninja-build libblas-dev liblapack-dev liblapacke-dev
+      - name: Build (CPU backend, warnings as errors)
+        env:
+          CMAKE_ARGS: -G Ninja -DMLX_BUILD_METAL=OFF -DMLX_BUILD_CUDA=OFF -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+        run: |
+          uv venv --python 3.12
+          source .venv/bin/activate
+          uv pip install cmake ninja setuptools typing_extensions numpy pytest
+          uv pip install --no-build-isolation -e . -v
+          python -c "import mlx.core as mx; print(mx.__version__, mx.default_device())"
+      - name: fp8 tests
+        env:
+          DEVICE: cpu
+        run: |
+          source .venv/bin/activate
+          python -m pytest python/tests/test_ops.py -k fp8 -v
+      - name: Exhaustive fp8 check
+        run: |
+          source .venv/bin/activate
+          python .github/fork-check/check_fp8_exhaustive.py
